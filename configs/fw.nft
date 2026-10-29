@@ -1,0 +1,22 @@
+# fw.nft – brannmurregler for segmenteringslabben
+# Lastes inn i fw-namespacen: sudo ip netns exec fw nft -f configs/fw.nft
+
+# Slett vår egen tabell hvis den finnes fra før (rører ikke andre tabeller)
+table inet segmentering
+delete table inet segmentering
+
+table inet segmentering {
+    chain forward {
+        # Pakker som går GJENNOM brannmuren. Standard: kast alt.
+        type filter hook forward priority 0; policy drop;
+
+        # Svar på tilkoblinger som allerede er tillatt
+        ct state established,related accept
+        ct state invalid drop
+
+        # --- tillatte regler kommer her (neste steg) ---
+
+        # Alt som kom hit er ikke tillatt: tell og kast
+        counter drop
+    }
+}
