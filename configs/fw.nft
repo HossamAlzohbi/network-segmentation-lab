@@ -21,6 +21,12 @@ table inet segmentering {
         # staff -> DMZ: web traffic
         iifname "fw-ansatte" oifname "fw-dmz" tcp dport { 80, 443 } ct state new accept
 
+        # management -> staff, servers, DMZ: SSH for administration
+        iifname "fw-management" oifname { "fw-ansatte", "fw-servere", "fw-dmz" } tcp dport 22 ct state new accept
+
+        # management -> staff, servers, DMZ: ping for troubleshooting
+        iifname "fw-management" oifname { "fw-ansatte", "fw-servere", "fw-dmz" } icmp type echo-request ct state new accept
+
         # Anything reaching this point is not allowed: count and drop
         counter drop
     }
