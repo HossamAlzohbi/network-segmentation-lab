@@ -1,14 +1,44 @@
 # fw.nft - firewall rules for the network segmentation lab
-# Load into the fw namespace: sudo ip netns exec fw nft -f configs/fw.nft
+# Loaded automatically by scripts/setup.sh into the fw namespace.
 
 # Remove our own table if it exists so the file can be reloaded safely.
 # Other tables are left untouched.
-table inet segmentering
-delete table inet segmentering
+table inet segmentation
+delete table inet segmentation
 
-table inet segmentering {
+table inet segmentation {
+
+    # Port forwarding: web traffic aimed at the firewall's public address
+    # is sent on to the web server in the DMZ. Matching on the destination
+    # address matters: without it, ALL web traffic from the internet would
+    # be redirected, whatever address it was meant for.
+    chain prerouting {
+        type nat hook prerouting priority dstnat; policy accept;
+        iifname "fw-internet" ip daddr 203.0.113.1 tcp dport { 80, 443 } dnat ip to 10.10.30.10
+    }
+
+    # Outbound NAT: hide internal addresses behind the firewall's public address
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+        oifname "fw-internet" masquerade
+    }
+
+    # Traffic addressed to the firewall itself. Only management may reach it.
+    chain input {
+        type filter hook input priority 0; policy drop;
+
+        iifname "lo" accept
+        ct state established,related accept
+        ct state invalid drop
+
+        iifname "fw-management" tcp dport 22 ct state new accept
+        iifname "fw-management" icmp type echo-request accept
+
+        counter drop
+    }
+
+    # Traffic passing THROUGH the firewall between zones. Default: drop.
     chain forward {
-        # Traffic passing THROUGH the firewall between zones. Default: drop.
         type filter hook forward priority 0; policy drop;
 
         # Replies to connections that were already allowed
@@ -16,16 +46,22 @@ table inet segmentering {
         ct state invalid drop
 
         # staff -> servers: file sharing (SMB)
-        iifname "fw-ansatte" oifname "fw-servere" tcp dport 445 ct state new accept
+        iifname "fw-staff" oifname "fw-servers" tcp dport 445 ct state new accept
 
         # staff -> DMZ: web traffic
-        iifname "fw-ansatte" oifname "fw-dmz" tcp dport { 80, 443 } ct state new accept
+        iifname "fw-staff" oifname "fw-dmz" tcp dport { 80, 443 } ct state new accept
 
         # management -> staff, servers, DMZ: SSH for administration
-        iifname "fw-management" oifname { "fw-ansatte", "fw-servere", "fw-dmz" } tcp dport 22 ct state new accept
+        iifname "fw-management" oifname { "fw-staff", "fw-servers", "fw-dmz" } tcp dport 22 ct state new accept
 
         # management -> staff, servers, DMZ: ping for troubleshooting
-        iifname "fw-management" oifname { "fw-ansatte", "fw-servere", "fw-dmz" } icmp type echo-request ct state new accept
+        iifname "fw-management" oifname { "fw-staff", "fw-servers", "fw-dmz" } icmp type echo-request ct state new accept
+
+        # staff, guests and management -> internet: web only
+        iifname { "fw-staff", "fw-guests", "fw-management" } oifname "fw-internet" tcp dport { 80, 443 } ct state new accept
+
+        # internet -> DMZ: web only, and only connections that were port-forwarded
+        iifname "fw-internet" oifname "fw-dmz" tcp dport { 80, 443 } ct state new ct status dnat accept
 
         # Anything reaching this point is not allowed: count and drop
         counter drop
